@@ -38,65 +38,25 @@ const INITIAL_RATES = {
 const REGISTRATION_TEMPLATE_HEADERS = ['Full Name', 'Age', 'Gender', 'Section'];
 const REGISTRATION_SECTIONS = Object.keys(INITIAL_RATES);
 
-const INITIAL_GROUPS = [
-  { id: 'GRP-001', refNo: 'AGU-BTN-001', division: 'Butuan City', district: 'North Butuan District', school: 'Butuan Central Elementary School', regDate: '2026-10-12', personnel: 'Maria Santos' },
-  { id: 'GRP-002', refNo: 'AGU-ADN-002', division: 'Agusan del Norte', district: 'Cabadbaran District', school: 'Cabadbaran City National High School', regDate: '2026-10-15', personnel: 'Maria Santos' },
-  { id: 'GRP-003', refNo: 'AGU-ADS-003', division: 'Agusan del Sur', district: 'Bayugan East District', school: 'Bayugan National Comprehensive High School', regDate: '2026-10-19', personnel: 'Jose Reyes' },
-];
+const INITIAL_GROUPS = [];
 
-const INITIAL_PARTICIPANTS = [
-  { id: 'BSP-AG-0001', groupId: 'GRP-001', fullName: 'Juan Carlos Dela Cruz', sex: 'Male', dob: '2015-04-12', category: 'Kab Scouts', division: 'Butuan City', district: 'North Butuan District', school: 'Butuan Central Elementary School', regDate: '2026-10-12', feeSnapshot: 500, paidAmount: 500 },
-  { id: 'BSP-AG-0002', groupId: 'GRP-001', fullName: 'Angela Mae Villanueva', sex: 'Female', dob: '2015-08-23', category: 'Kab Scouts', division: 'Butuan City', district: 'North Butuan District', school: 'Butuan Central Elementary School', regDate: '2026-10-12', feeSnapshot: 500, paidAmount: 500 },
-  { id: 'BSP-AG-0003', groupId: 'GRP-001', fullName: 'Scouter Roberto Lim', sex: 'Male', dob: '1986-02-14', category: 'Unit Leader', division: 'Butuan City', district: 'North Butuan District', school: 'Butuan Central Elementary School', regDate: '2026-10-12', feeSnapshot: 550, paidAmount: 550 },
-  { id: 'BSP-AG-0004', groupId: 'GRP-002', fullName: 'Mark Anthony Mendoza', sex: 'Male', dob: '2012-11-03', category: 'Boy Scouts', division: 'Agusan del Norte', district: 'Cabadbaran District', school: 'Cabadbaran City National High School', regDate: '2026-10-15', feeSnapshot: 600, paidAmount: 600 },
-  { id: 'BSP-AG-0005', groupId: 'GRP-002', fullName: 'Katrina Joy Bautista', sex: 'Female', dob: '2009-06-18', category: 'Senior Scouts', division: 'Agusan del Norte', district: 'Cabadbaran District', school: 'Cabadbaran City National High School', regDate: '2026-10-15', feeSnapshot: 650, paidAmount: 650 },
-  { id: 'BSP-AG-0006', groupId: 'GRP-003', fullName: 'Rafael Miguel Torres', sex: 'Male', dob: '2007-01-29', category: 'Rover Scouts', division: 'Agusan del Sur', district: 'Bayugan East District', school: 'Bayugan National Comprehensive High School', regDate: '2026-10-19', feeSnapshot: 700, paidAmount: 700 },
-];
+const INITIAL_PARTICIPANTS = [];
 
-const INITIAL_CRVS = [
-  { crvNo: 'CRV-0001', type: 'Cash Advance Release', date: '2026-10-22', party: 'Engr. Dante Navarro (Camp Logistics)', amount: 15000, method: 'Cash', refNo: 'CA-2026-001', description: 'Cash Advance Release – Site Clearing & Bamboo', issuedBy: 'Carlos Magno', status: 'Active' },
-];
+const INITIAL_CRVS = [];
 
-const INITIAL_DONATIONS = [
-  { id: 'DON-001', donor: 'Agusan Fil-Chinese Chamber of Commerce', date: '2026-10-20', amount: 25000, method: 'Check', refNo: 'CHK-009182', purpose: 'Medical Tent & Drinking Water', recordedBy: 'Elena Cruz' },
-  { id: 'DON-002', donor: 'Hon. Vicente Pimentel Foundation', date: '2026-10-28', amount: 15000, method: 'Bank Transfer', refNo: 'DBP-771290', purpose: 'Scout Trail & Obstacle Materials', recordedBy: 'Elena Cruz' },
-];
+const INITIAL_DONATIONS = [];
 
-const INITIAL_TOKENS = [
-  { id: 'TKN-CAT-1', name: 'Jamboree Neckerchief & Slide', description: 'Eligible: Kid Scouts, Kab Scouts, Boy Scouts, Senior Scouts, Rover Scouts, Unit Leader', totalStock: 500, issued: 4 },
-  { id: 'TKN-CAT-2', name: '2026 Agusan Jamboree Cloth Patch', description: 'Eligible: Kid Scouts, Kab Scouts, Boy Scouts, Senior Scouts, Rover Scouts, Unit Leader', totalStock: 600, issued: 4 },
-  { id: 'TKN-CAT-3', name: 'Unit Leader Souvenir Lanyard & ID', description: 'Eligible: Unit Leader', totalStock: 120, issued: 1 },
-];
+const INITIAL_TOKENS = [];
 
 const INITIAL_ACCOUNTS = [
-  { id: 'ACC-01', name: 'Council Petty Cash Vault', type: 'Cash on Hand', balance: 33850 },
-  { id: 'ACC-02', name: 'LandBank Butuan – BSP Council Trust', type: 'Bank Account', balance: 185600 },
-  { id: 'ACC-03', name: 'BSP Agusan Official GCash Merchant', type: 'E-Wallet', balance: 28650 },
+  { id: 'ACC-01', name: 'Council Petty Cash Vault', type: 'Cash on Hand', balance: 0 },
+  { id: 'ACC-02', name: 'LandBank Butuan – BSP Council Trust', type: 'Bank Account', balance: 0 },
+  { id: 'ACC-03', name: 'BSP Agusan Official GCash Merchant', type: 'E-Wallet', balance: 0 },
 ];
 
-const INITIAL_ADVANCES = [
-  { id: 'CA-2026-001', requester: 'Engr. Dante Navarro', category: 'Camp Logistics', purpose: 'Bamboo poles, rope, and sub-camp gateway materials', amount: 15000, dateNeeded: '2026-10-24', status: 'Partially Liquidated', cashReturned: 0, crvNo: 'CRV-0001', accountId: 'ACC-01' },
-  { id: 'CA-2026-002', requester: 'Dr. Liza Almonte', category: 'Health & First Aid', purpose: 'Emergency medical kit replenishment & hydration', amount: 8500, dateNeeded: '2026-11-15', status: 'Approved', cashReturned: 0, crvNo: null, accountId: 'ACC-01' },
-  { id: 'CA-2026-003', requester: 'Finance Admin', category: 'Program & Awards', purpose: 'Printing of merit certificates & activity passports', amount: 6200, dateNeeded: '2026-11-18', status: 'Pending', cashReturned: 0, crvNo: null, accountId: null },
-];
+const INITIAL_ADVANCES = [];
 
-const INITIAL_LIQUIDATIONS = [
-  {
-    id: 'LIQ-2026-001',
-    advanceId: 'CA-2026-001',
-    crvNo: 'CRV-0001',
-    requester: 'Engr. Dante Navarro',
-    advanceAmount: 15000,
-    dateSubmitted: '2026-11-02',
-    status: 'Under Review',
-    cashReturned: 0,
-    items: [
-      { id: 'EXP-1', date: '2026-10-25', category: 'Materials', description: '120 pcs Mature Bamboo Poles (OR #4412)', amount: 9600, status: 'Accepted', remarks: 'Verified OR' },
-      { id: 'EXP-2', date: '2026-10-26', category: 'Hardware', description: 'Abaca rope & tie wire (OR #4489)', amount: 3200, status: 'Accepted', remarks: 'Verified OR' },
-      { id: 'EXP-3', date: '2026-10-27', category: 'Meals', description: 'Unreceipted snacks for haulers', amount: 950, status: 'Pending', remarks: 'Awaiting acknowledgement receipt' },
-    ],
-  },
-];
+const INITIAL_LIQUIDATIONS = [];
 
 export default function App() {
   const [activeRole, setActiveRole] = useState('System Administrator');
@@ -156,6 +116,33 @@ export default function App() {
       { id: Date.now(), timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19), actor: activeRole, action, details },
       ...prev,
     ]);
+  };
+
+  const handleSystemReset = () => {
+    if (activeRole !== 'System Administrator') {
+      return notify('Only System Administrator can reset system records.', 'error');
+    }
+    if (!window.confirm('Clear all registered scouts, cash advances, liquidations, donations, CRVs, tokens, and reset account balances to zero?')) {
+      return;
+    }
+
+    setGroups([]);
+    setParticipants([]);
+    setCrvs([]);
+    setDonations([]);
+    setTokens([]);
+    setAccounts(INITIAL_ACCOUNTS.map((account) => ({ ...account, balance: 0 })));
+    setAdvances([]);
+    setLiquidations([]);
+    setSelectedCrv(null);
+    setSearchTerm('');
+    setCategoryFilter('All');
+    setExpandedGroupId(null);
+    setRegistrationConfirmation(null);
+    setImportNotice('');
+    setCaForm({ requester: activeRole, category: 'Camp Logistics', purpose: '', amount: '', dateNeeded: '2026-11-19' });
+    logAudit('SYSTEM_RESET', 'Cleared all system records and reset financial account balances to zero');
+    notify('All system records were cleared and balances reset to zero.');
   };
 
   // Atomic Global CRV Generator
@@ -1707,6 +1694,23 @@ export default function App() {
                 <p className="text-xs text-slate-500">
                   Note: Closing an event still allows late registrations, collections, liquidations, and adjustments. Only <strong>Archived</strong> locks ordinary transactions.
                 </p>
+              </div>
+
+              <div className="bg-rose-50 p-5 rounded-xl border border-rose-200 shadow-sm space-y-3">
+                <div>
+                  <h2 className="font-bold text-rose-900">Reset System Records</h2>
+                  <p className="text-xs text-rose-700 mt-1">
+                    Clears registered contingents and participants, cash advances, liquidations, donations, CRVs, and token records. Account balances are reset to zero. Jamboree settings and registration prices are preserved.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSystemReset}
+                  disabled={activeRole !== 'System Administrator'}
+                  className="px-4 py-2 rounded-lg text-sm font-semibold bg-rose-700 text-white hover:bg-rose-800 disabled:bg-slate-300 disabled:text-slate-500"
+                >
+                  Clear All Records
+                </button>
               </div>
 
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
