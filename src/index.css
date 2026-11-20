@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #printable-crv-voucher, #printable-crv-voucher * {
+    visibility: visible;
+  }
+  #printable-crv-voucher {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: none !important;
+    box-shadow: none !important;
+  }
+}
