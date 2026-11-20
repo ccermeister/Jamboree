@@ -24,3 +24,4 @@ A full-stack Scouting Jamboree management platform for the **Boy Scouts of the P
    npm run build
    ```
 # Jamboree
+# Jamboree
