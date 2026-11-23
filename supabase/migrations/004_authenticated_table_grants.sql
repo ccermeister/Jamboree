@@ -26,7 +26,16 @@ GRANT UPDATE ON TABLE
 TO authenticated;
 
 GRANT INSERT, UPDATE ON TABLE public.fee_rates TO authenticated;
-GRANT INSERT ON TABLE public.cash_advances, public.audit_logs TO authenticated;
-GRANT USAGE, SELECT ON SEQUENCE public.audit_logs_id_seq TO authenticated;
+GRANT INSERT ON TABLE
+  public.registration_groups,
+  public.participants,
+  public.payments,
+  public.cash_advances,
+  public.audit_logs
+TO authenticated;
+GRANT USAGE, SELECT ON SEQUENCE
+  public.participant_id_seq,
+  public.audit_logs_id_seq
+TO authenticated;
 
 COMMIT;
