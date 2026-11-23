@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   LayoutDashboard, Users, Receipt, HeartHandshake, Award,
   Banknote, FileCheck2, Landmark, FileBarChart2, Settings, ShieldAlert,
@@ -9,14 +9,20 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend
 } from 'recharts';
 import { formatPHP, numberToWordsPHP } from './lib/utils';
-
-const ROLES = [
-  'System Administrator',
-  'Registration Personnel',
-  'Collection Personnel',
-  'Cash Custodian',
-  'Finance Admin',
-];
+import { isSupabaseConfigured, supabase } from './lib/supabase';
+import {
+  createCashAdvance,
+  liquidateCashAdvance,
+  loadJamboreeData,
+  registerContingent,
+  releaseCashAdvance,
+  resetJamboreeRecords,
+  reviewCashAdvance,
+  saveJamboreeStatus,
+  saveRegistrationRates,
+  saveTokenCategory,
+  writeAuditLog,
+} from './lib/jamboreeRepository';
 
 const INITIAL_SETTINGS = {
   jamboreeName: '2026 Agusan Council Joint Scouting Jamboree',
@@ -59,7 +65,16 @@ const INITIAL_ADVANCES = [];
 const INITIAL_LIQUIDATIONS = [];
 
 export default function App() {
-  const [activeRole, setActiveRole] = useState('System Administrator');
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [authLoading, setAuthLoading] = useState(Boolean(isSupabaseConfigured));
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [activeRole, setActiveRole] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [toast, setToast] = useState(null);
@@ -101,7 +116,7 @@ export default function App() {
 
   // Cash Advance Form
   const [caForm, setCaForm] = useState({
-    requester: activeRole, category: 'Camp Logistics', purpose: '', amount: '', dateNeeded: '2026-11-19'
+    requester: '', category: 'Camp Logistics', purpose: '', amount: '', dateNeeded: '2026-11-19'
   });
 
   const isLocked = settings.status === 'Archived';
@@ -111,14 +126,134 @@ export default function App() {
     setTimeout(() => setToast(null), 3500);
   };
 
-  const logAudit = (action, details) => {
-    setAuditLogs((prev) => [
-      { id: Date.now(), timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19), actor: activeRole, action, details },
-      ...prev,
-    ]);
+  const refreshWorkspace = async (currentProfile = profile) => {
+    if (!currentProfile) return;
+    setWorkspaceError('');
+    const data = await loadJamboreeData(currentProfile);
+    setSettings(data.settings);
+    setRates(data.rates);
+    setRateForm(data.rates);
+    setGroups(data.groups);
+    setParticipants(data.participants);
+    setCrvs(data.crvs);
+    setDonations(data.donations);
+    setTokens(data.tokens);
+    setAccounts(data.accounts);
+    setAdvances(data.advances);
+    setLiquidations(data.liquidations);
+    setAuditLogs(data.auditLogs);
+    return data;
   };
 
-  const handleSystemReset = () => {
+  const logAudit = async (action, details) => {
+    if (!profile) return;
+    try {
+      await writeAuditLog({ actorId: profile.id, action, details });
+      setAuditLogs((prev) => [
+        { id: Date.now(), timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19), actor: profile.full_name, action, details },
+        ...prev,
+      ]);
+    } catch (error) {
+      console.error('Unable to write audit log:', error);
+      notify(`The action completed, but its audit entry could not be saved: ${error.message}`, 'error');
+    }
+  };
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setAuthLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      setAuthError('');
+    });
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) setAuthError(error.message);
+      setSession(data?.session || null);
+      setAuthLoading(false);
+    }).catch((error) => {
+      if (!active) return;
+      setAuthError(error.message);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setProfile(null);
+      setActiveRole('');
+      setWorkspaceLoading(false);
+      return undefined;
+    }
+
+    let active = true;
+    setWorkspaceLoading(true);
+    setWorkspaceError('');
+    supabase
+      .from('user_profiles')
+      .select('id, full_name, email, role, is_active')
+      .eq('id', session.user.id)
+      .maybeSingle()
+      .then(async ({ data, error }) => {
+        if (!active) return;
+        if (error) throw error;
+        if (!data) throw new Error('Your account has no user profile. Ask a System Administrator to create one.');
+        if (!data.is_active) throw new Error('This account is inactive. Ask a System Administrator for access.');
+        setProfile(data);
+        setActiveRole(data.role);
+        setCaForm((form) => ({ ...form, requester: data.full_name }));
+        await refreshWorkspace(data);
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.error('Unable to load Supabase workspace:', error);
+        setWorkspaceError(error.message || 'Unable to load the Supabase workspace.');
+      })
+      .finally(() => {
+        if (active) setWorkspaceLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [session]);
+
+  const handleSignIn = async (event) => {
+    event.preventDefault();
+    setAuthBusy(true);
+    setAuthError('');
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      if (error) throw error;
+      setPassword('');
+    } catch (error) {
+      setAuthError(error.message || 'Unable to sign in.');
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    setProfile(null);
+    setActiveRole('');
+  };
+
+  const handleSystemReset = async () => {
     if (activeRole !== 'System Administrator') {
       return notify('Only System Administrator can reset system records.', 'error');
     }
@@ -126,44 +261,22 @@ export default function App() {
       return;
     }
 
-    setGroups([]);
-    setParticipants([]);
-    setCrvs([]);
-    setDonations([]);
-    setTokens([]);
-    setAccounts(INITIAL_ACCOUNTS.map((account) => ({ ...account, balance: 0 })));
-    setAdvances([]);
-    setLiquidations([]);
-    setSelectedCrv(null);
-    setSearchTerm('');
-    setCategoryFilter('All');
-    setExpandedGroupId(null);
-    setRegistrationConfirmation(null);
-    setImportNotice('');
-    setCaForm({ requester: activeRole, category: 'Camp Logistics', purpose: '', amount: '', dateNeeded: '2026-11-19' });
-    logAudit('SYSTEM_RESET', 'Cleared all system records and reset financial account balances to zero');
-    notify('All system records were cleared and balances reset to zero.');
-  };
-
-  // Atomic Global CRV Generator
-  const issueNextCrv = ({ type, party, amount, method, refNo, description }) => {
-    const nextNum = crvs.length + 1;
-    const crvNo = `CRV-${String(nextNum).padStart(4, '0')}`;
-    const newCrv = {
-      crvNo,
-      type,
-      date: new Date().toISOString().slice(0, 10),
-      party,
-      amount: Number(amount),
-      method,
-      refNo: refNo || '-',
-      description,
-      issuedBy: activeRole,
-      status: 'Active',
-    };
-    setCrvs((prev) => [newCrv, ...prev]);
-    logAudit('ISSUE_CRV', `Generated ${crvNo} (${type}) for ${formatPHP(amount)}`);
-    return newCrv;
+    try {
+      await resetJamboreeRecords();
+      await refreshWorkspace();
+      setSelectedCrv(null);
+      setSearchTerm('');
+      setCategoryFilter('All');
+      setExpandedGroupId(null);
+      setRegistrationConfirmation(null);
+      setImportNotice('');
+      setCaForm({ requester: profile.full_name, category: 'Camp Logistics', purpose: '', amount: '', dateNeeded: '2026-11-19' });
+      await logAudit('SYSTEM_RESET', 'Cleared system records and reset account balances to zero');
+      notify('All system records were cleared and balances reset to zero.');
+    } catch (error) {
+      console.error('Unable to reset Supabase records:', error);
+      notify(`Unable to reset records: ${error.message}`, 'error');
+    }
   };
 
   // KPIs
@@ -250,7 +363,7 @@ export default function App() {
     });
   };
 
-  const confirmContingentRegistration = () => {
+  const confirmContingentRegistration = async () => {
     if (!registrationConfirmation) return;
     if (isLocked) {
       setRegistrationConfirmation(null);
@@ -261,26 +374,33 @@ export default function App() {
     if (!group.bankReference?.trim()) {
       return notify('Enter the contingent bank reference number before confirming.', 'error');
     }
-    const paidParticipants = newParticipants.map((participant) => ({
-      ...participant,
-      paidAmount: participant.feeSnapshot,
-    }));
 
-    setGroups((prev) => [group, ...prev]);
-    setParticipants((prev) => [...paidParticipants, ...prev]);
-    setRegistrationConfirmation(null);
-    setRegForm({
-      division: '',
-      district: '',
-      school: '',
-      bankReference: '',
-      roster: [{ rowId: 1, fullName: '', age: '', sex: 'Male', category: 'Boy Scouts' }],
-    });
-    setImportNotice('');
-    const totalPaid = newParticipants.reduce((sum, participant) => sum + participant.feeSnapshot, 0);
-    logAudit('REGISTER_CONTINGENT', `Registered ${group.refNo} (${group.school}) with ${newParticipants.length} participants`);
-    logAudit('REGISTRATION_PAYMENT', `Recorded ${formatPHP(totalPaid)} as paid by Bank Transfer; reference ${group.bankReference}`);
-    notify(`Registered and marked ${newParticipants.length} participant${newParticipants.length === 1 ? '' : 's'} fully paid. No CRV is issued for registration.`);
+    try {
+      const createdGroup = await registerContingent({
+        division: group.division,
+        district: group.district,
+        school: group.school,
+        bankReference: group.bankReference,
+        participants: newParticipants,
+      });
+      await refreshWorkspace();
+      setRegistrationConfirmation(null);
+      setRegForm({
+        division: '',
+        district: '',
+        school: '',
+        bankReference: '',
+        roster: [{ rowId: 1, fullName: '', age: '', sex: 'Male', category: 'Boy Scouts' }],
+      });
+      setImportNotice('');
+      const totalPaid = Number(createdGroup.total_paid);
+      await logAudit('REGISTER_CONTINGENT', `Registered ${createdGroup.group_ref_no} (${group.school}) with ${newParticipants.length} participants`);
+      await logAudit('REGISTRATION_PAYMENT', `Recorded ${formatPHP(totalPaid)} as paid by Bank Transfer; reference ${group.bankReference}`);
+      notify(`Registered and marked ${newParticipants.length} participant${newParticipants.length === 1 ? '' : 's'} fully paid. No CRV is issued for registration.`);
+    } catch (error) {
+      console.error('Unable to register contingent in Supabase:', error);
+      notify(`Registration was not saved: ${error.message}`, 'error');
+    }
   };
 
   const downloadRegistrationTemplate = async (format) => {
@@ -400,7 +520,7 @@ export default function App() {
     }
   };
 
-  const handleSaveRegistrationRates = (event) => {
+  const handleSaveRegistrationRates = async (event) => {
     event.preventDefault();
     if (activeRole !== 'System Administrator') {
       return notify('Only System Administrator can update registration prices.', 'error');
@@ -415,85 +535,70 @@ export default function App() {
       updatedRates[section] = amount;
     }
 
-    setRates(updatedRates);
-    setRateForm(updatedRates);
-    logAudit('REGISTRATION_RATES_UPDATE', 'Updated Jamboree registration prices by section');
-    notify('Jamboree registration prices updated.');
+    try {
+      await saveRegistrationRates(updatedRates);
+      setRates(updatedRates);
+      setRateForm(updatedRates);
+      await logAudit('REGISTRATION_RATES_UPDATE', 'Updated Jamboree registration prices by section');
+      notify('Jamboree registration prices updated.');
+    } catch (error) {
+      console.error('Unable to save registration rates:', error);
+      notify(`Registration prices were not saved: ${error.message}`, 'error');
+    }
   };
 
-  const handleSubmitCashAdvance = (event) => {
+  const handleSubmitCashAdvance = async (event) => {
     event.preventDefault();
     if (isLocked) return notify('Jamboree is Archived. Transactions are locked.', 'error');
 
-    const requester = caForm.requester.trim();
     const purpose = caForm.purpose.trim();
     const amount = Number(caForm.amount);
-    if (!requester || !purpose || !caForm.category || !caForm.dateNeeded) {
-      return notify('Complete the requester, category, description, amount, and date needed.', 'error');
+    if (!purpose || !caForm.category || !caForm.dateNeeded) {
+      return notify('Complete the category, description, amount, and date needed.', 'error');
     }
     if (!Number.isFinite(amount) || amount <= 0) {
       return notify('Enter a valid cash advance amount greater than zero.', 'error');
     }
 
-    const nextNumber = advances.reduce((maxNumber, advance) => {
-      const match = advance.id.match(/^CA-\d{4}-(\d+)$/);
-      return match ? Math.max(maxNumber, Number(match[1])) : maxNumber;
-    }, 0) + 1;
-    const request = {
-      id: `CA-${new Date().getFullYear()}-${String(nextNumber).padStart(3, '0')}`,
-      requester,
-      category: caForm.category,
-      purpose,
-      amount,
-      dateNeeded: caForm.dateNeeded,
-      status: 'Pending',
-      crvNo: null,
-      accountId: null,
-    };
-
-    setAdvances((prev) => [request, ...prev]);
-    logAudit('CASH_ADVANCE_REQUEST', `Submitted ${request.id} for ${formatPHP(amount)}: ${purpose}`);
-    setCaForm({ requester: activeRole, category: 'Camp Logistics', purpose: '', amount: '', dateNeeded: '2026-11-19' });
-    notify(`Cash advance request ${request.id} submitted for approval.`);
+    try {
+      const request = await createCashAdvance({
+        purpose,
+        amount,
+        dateNeeded: caForm.dateNeeded,
+        category: caForm.category,
+      });
+      await refreshWorkspace();
+      await logAudit('CASH_ADVANCE_REQUEST', `Submitted ${request.request_no} for ${formatPHP(amount)}: ${purpose}`);
+      setCaForm({ requester: profile.full_name, category: 'Camp Logistics', purpose: '', amount: '', dateNeeded: '2026-11-19' });
+      notify(`Cash advance request ${request.request_no} submitted for approval.`);
+    } catch (error) {
+      console.error('Unable to submit cash advance:', error);
+      notify(`Cash advance request was not saved: ${error.message}`, 'error');
+    }
   };
 
   // Cash Advance Approval & Release
-  const handleApproveAdvance = (ca, decision) => {
+  const handleApproveAdvance = async (ca, decision) => {
     if (activeRole !== 'Finance Admin' && activeRole !== 'System Administrator') {
       return notify('Only Finance Admin can approve or reject cash advances.', 'error');
     }
-    if (ca.requester === activeRole) {
-      return notify('Security Control: A requester cannot approve their own cash advance.', 'error');
-    }
     if (ca.status !== 'Pending') return notify('Only pending cash advances can be reviewed.', 'error');
-
-    let accountId = null;
-    if (decision === 'Approved') {
-      const cashAccount = accounts.find((account) => account.id === 'ACC-01' && account.balance >= ca.amount);
-      const fundingAccount = cashAccount || accounts.find((account) => account.balance >= ca.amount);
-      if (!fundingAccount) {
-        return notify(`Insufficient funds to approve ${ca.id} for ${formatPHP(ca.amount)}.`, 'error');
+    try {
+      const accountId = await reviewCashAdvance(ca.dbId, decision);
+      await refreshWorkspace();
+      if (decision === 'Approved') {
+        const accountName = accounts.find((account) => account.id === accountId)?.name || 'cash account';
+        await logAudit('CASH_ADVANCE_FUNDS_RESERVED', `Reserved ${formatPHP(ca.amount)} from ${accountName} for ${ca.id}`);
       }
-      accountId = fundingAccount.id;
-      setAccounts((prev) => prev.map((account) =>
-        account.id === accountId ? { ...account, balance: account.balance - ca.amount } : account
-      ));
+      await logAudit('CASH_ADVANCE_REVIEW', `${decision} ${ca.id} (${formatPHP(ca.amount)})`);
+      notify(`Cash advance ${ca.id} marked as ${decision}.`);
+    } catch (error) {
+      console.error('Unable to review cash advance:', error);
+      notify(`Cash advance review failed: ${error.message}`, 'error');
     }
-
-    setAdvances((prev) => prev.map((item) => (item.id === ca.id ? {
-      ...item,
-      status: decision,
-      accountId: decision === 'Approved' ? accountId : item.accountId,
-      cashReturned: item.cashReturned ?? 0,
-    } : item)));
-    if (decision === 'Approved') {
-      logAudit('CASH_ADVANCE_FUNDS_RESERVED', `Reserved ${formatPHP(ca.amount)} from ${accounts.find((account) => account.id === accountId)?.name} for ${ca.id}`);
-    }
-    logAudit('CASH_ADVANCE_REVIEW', `${decision} ${ca.id} (${formatPHP(ca.amount)})`);
-    notify(`Cash advance ${ca.id} marked as ${decision}.`);
   };
 
-  const handleReleaseAdvance = (ca) => {
+  const handleReleaseAdvance = async (ca) => {
     if (activeRole !== 'Cash Custodian' && activeRole !== 'System Administrator') {
       return notify('Only Cash Custodian can release approved cash advances.', 'error');
     }
@@ -503,21 +608,17 @@ export default function App() {
     if (ca.crvNo) {
       return notify(`A Cash Release Voucher has already been issued for ${ca.id}.`, 'error');
     }
-    const fundingAccount = accounts.find((account) => account.id === ca.accountId);
-    if (!fundingAccount) return notify(`Reserved funds for ${ca.id} could not be found. Cannot release this advance.`, 'error');
-    const crv = issueNextCrv({
-      type: 'Cash Advance Release',
-      party: `${ca.requester} (${ca.category})`,
-      amount: ca.amount,
-      method: fundingAccount.type,
-      refNo: ca.id,
-      description: `Cash Advance Release: ${ca.purpose}`,
-    });
-    setAdvances((prev) =>
-      prev.map((item) => (item.id === ca.id ? { ...item, status: 'Released', cashReturned: item.cashReturned ?? 0, crvNo: crv.crvNo } : item))
-    );
-    setSelectedCrv(crv);
-    notify(`Cash released for ${ca.id} with ${crv.crvNo}.`);
+    try {
+      const crvSerial = await releaseCashAdvance(ca.dbId);
+      const workspace = await refreshWorkspace();
+      const crv = workspace.crvs.find((item) => item.crvNo === crvSerial);
+      if (crv) setSelectedCrv(crv);
+      await logAudit('CASH_ADVANCE_RELEASE', `Released ${ca.id} with ${crvSerial}`);
+      notify(`Cash released for ${ca.id} with ${crvSerial}.`);
+    } catch (error) {
+      console.error('Unable to release cash advance:', error);
+      notify(`Cash advance release failed: ${error.message}`, 'error');
+    }
   };
 
   const handleUpdateCashReturned = (advanceId, value) => {
@@ -526,7 +627,7 @@ export default function App() {
     ));
   };
 
-  const handleLiquidateAdvance = (ca) => {
+  const handleLiquidateAdvance = async (ca) => {
     if (activeRole !== 'Finance Admin' && activeRole !== 'System Administrator') {
       return notify('Only Finance Admin can confirm a cash advance liquidation.', 'error');
     }
@@ -538,34 +639,34 @@ export default function App() {
     if (String(ca.cashReturned ?? '').trim() === '' || !Number.isFinite(cashReturned) || cashReturned < 0 || cashReturned > ca.amount) {
       return notify(`Enter a cash return from ₱0.00 to ${formatPHP(ca.amount)}.`, 'error');
     }
-    const fundingAccount = accounts.find((account) => account.id === ca.accountId);
-    if (!fundingAccount) return notify(`The funding account for ${ca.id} could not be found.`, 'error');
-
-    setAccounts((prev) => prev.map((account) =>
-      account.id === fundingAccount.id ? { ...account, balance: account.balance + cashReturned } : account
-    ));
-    setAdvances((prev) => prev.map((item) => item.id === ca.id
-      ? { ...item, status: 'Fully Liquidated', cashReturned, liquidatedAt: new Date().toISOString().slice(0, 10) }
-      : item
-    ));
-    setLiquidations((prev) => prev.map((liquidation) => liquidation.advanceId === ca.id
-      ? { ...liquidation, cashReturned, status: 'Liquidated', dateSubmitted: new Date().toISOString().slice(0, 10) }
-      : liquidation
-    ));
-    logAudit('CASH_ADVANCE_LIQUIDATION', `Liquidated ${ca.id}; returned ${formatPHP(cashReturned)} to ${fundingAccount.name}`);
-    notify(`${ca.id} marked liquidated. ${formatPHP(cashReturned)} returned to funds.`);
+    try {
+      await liquidateCashAdvance(ca.dbId, cashReturned);
+      await refreshWorkspace();
+      const fundingAccount = accounts.find((account) => account.id === ca.accountId);
+      await logAudit('CASH_ADVANCE_LIQUIDATION', `Liquidated ${ca.id}; returned ${formatPHP(cashReturned)} to ${fundingAccount?.name || 'funds'}`);
+      notify(`${ca.id} marked liquidated. ${formatPHP(cashReturned)} returned to funds.`);
+    } catch (error) {
+      console.error('Unable to liquidate cash advance:', error);
+      notify(`Cash advance liquidation failed: ${error.message}`, 'error');
+    }
   };
 
-  const handleJamboreeStatusChange = (status) => {
+  const handleJamboreeStatusChange = async (status) => {
     if (activeRole !== 'System Administrator') {
       return notify('Only System Administrator can change Jamboree status.', 'error');
     }
     if (!['Draft', 'Active', 'Closed', 'Archived'].includes(status)) {
       return notify('Select a valid Jamboree status.', 'error');
     }
-    setSettings((current) => ({ ...current, status }));
-    logAudit('STATUS_CHANGE', `Changed Jamboree status to ${status}`);
-    notify(`Jamboree status updated to ${status}`);
+    try {
+      await saveJamboreeStatus(status);
+      setSettings((current) => ({ ...current, status }));
+      await logAudit('STATUS_CHANGE', `Changed Jamboree status to ${status}`);
+      notify(`Jamboree status updated to ${status}`);
+    } catch (error) {
+      console.error('Unable to update jamboree status:', error);
+      notify(`Jamboree status was not updated: ${error.message}`, 'error');
+    }
   };
 
   const startTokenEdit = (token) => {
@@ -588,7 +689,7 @@ export default function App() {
     setTokenDraft((current) => ({ ...current, [field]: value }));
   };
 
-  const saveTokenEdit = (tokenId) => {
+  const saveTokenEdit = async (tokenId) => {
     if (activeRole !== 'System Administrator') {
       return notify('Only System Administrator can edit token inventory.', 'error');
     }
@@ -610,17 +711,26 @@ export default function App() {
     }
 
     const original = tokens.find((token) => token.id === tokenId);
-    setTokens((current) => current.map((token) => token.id === tokenId ? {
-      ...token,
-      name: tokenDraft.name.trim(),
-      description: tokenDraft.description.trim(),
-      totalStock,
-      issued: totalStock - available,
-    } : token));
-    logAudit('TOKEN_INVENTORY_UPDATE', `Saved inventory card "${original?.name ?? tokenId}"`);
-    setEditingTokenId(null);
-    setTokenDraft(null);
-    notify('Inventory card changes saved.');
+    if (!original) return notify('Inventory category could not be found. Refresh and try again.', 'error');
+    if (totalStock - available !== original.issued) {
+      return notify('Issued stock is calculated from recorded token issuances and cannot be changed here.', 'error');
+    }
+
+    try {
+      await saveTokenCategory(tokenId, {
+        name: tokenDraft.name.trim(),
+        description: tokenDraft.description.trim(),
+        totalQuantity: totalStock,
+      });
+      await refreshWorkspace();
+      await logAudit('TOKEN_INVENTORY_UPDATE', `Saved inventory card "${original?.name ?? tokenId}"`);
+      setEditingTokenId(null);
+      setTokenDraft(null);
+      notify('Inventory card changes saved.');
+    } catch (error) {
+      console.error('Unable to save token inventory:', error);
+      notify(`Inventory changes were not saved: ${error.message}`, 'error');
+    }
   };
 
   const cancelTokenEdit = () => {
@@ -685,6 +795,88 @@ export default function App() {
     return districts;
   }, []).filter((district) => district.value > 0);
   const chartColors = ['#115E34', '#0F766E', '#D97706', '#2563EB', '#7C3AED', '#DB2777', '#64748B'];
+
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+        <section className="w-full max-w-lg rounded-xl border border-amber-200 bg-white p-6 shadow-sm">
+          <h1 className="text-xl font-bold text-slate-900">Supabase configuration required</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in the project’s
+            <code> .env</code> file, then restart the Vite server.
+          </p>
+        </section>
+      </div>
+    );
+  }
+
+  if (authLoading || (session && workspaceLoading)) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 text-sm font-medium text-slate-600">
+        Connecting to Supabase…
+      </div>
+    );
+  }
+
+  if (session && workspaceError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+        <section className="w-full max-w-lg rounded-xl border border-rose-200 bg-white p-6 shadow-sm">
+          <h1 className="text-xl font-bold text-slate-900">Unable to load your Jamboree workspace</h1>
+          <p className="mt-2 text-sm text-rose-700">{workspaceError}</p>
+          <div className="mt-5 flex justify-end">
+            <button onClick={handleSignOut} className="rounded-lg bg-[#115E34] px-4 py-2 text-sm font-semibold text-white">
+              Sign out
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+        <form onSubmit={handleSignIn} className="w-full max-w-md space-y-5 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-widest text-emerald-800">BSP Agusan Council</div>
+            <h1 className="mt-1 text-2xl font-bold text-slate-900">Sign in to Jamboree</h1>
+            <p className="mt-2 text-sm text-slate-500">Use the Supabase Auth account assigned to you.</p>
+          </div>
+          {authError && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{authError}</p>}
+          <label className="block text-sm font-medium text-slate-700">
+            Email
+            <input
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+              required
+            />
+          </label>
+          <label className="block text-sm font-medium text-slate-700">
+            Password
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
+              required
+            />
+          </label>
+          <button
+            type="submit"
+            disabled={authBusy}
+            className="w-full rounded-lg bg-[#115E34] px-4 py-2.5 font-semibold text-white hover:bg-[#0A361E] disabled:opacity-60"
+          >
+            {authBusy ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-100 text-slate-800">
@@ -760,16 +952,16 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-xs font-semibold text-slate-500 uppercase">Active Role:</label>
-            <select
-              value={activeRole}
-              onChange={(e) => setActiveRole(e.target.value)}
-              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium bg-slate-50 text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+            <div className="text-right">
+              <div className="text-sm font-semibold text-slate-800">{profile.full_name}</div>
+              <div className="text-xs text-slate-500">{activeRole} · {profile.email}</div>
+            </div>
+            <button
+              onClick={handleSignOut}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>{r}</option>
-              ))}
-            </select>
+              Sign out
+            </button>
           </div>
         </header>
 
@@ -1430,10 +1622,9 @@ export default function App() {
                     <input
                       type="text"
                       aria-label="Cash advance requester"
-                      value={caForm.requester}
-                      onChange={(event) => setCaForm({ ...caForm, requester: event.target.value })}
-                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                      required
+                      value={profile?.full_name || ''}
+                      readOnly
+                      className="w-full border border-slate-300 rounded-lg bg-slate-50 px-3 py-2 text-sm"
                     />
                   </div>
                   <div>
@@ -1546,10 +1737,20 @@ export default function App() {
                       <td className="px-4 py-3 space-x-2">
                         {ca.status === 'Pending' && (
                           <>
-                            <button onClick={() => handleApproveAdvance(ca, 'Approved')} className="px-2.5 py-1 bg-emerald-700 text-white text-xs rounded font-semibold">
+                            <button
+                              onClick={() => handleApproveAdvance(ca, 'Approved')}
+                              disabled={ca.requesterId === profile.id}
+                              title={ca.requesterId === profile.id ? 'A requester cannot review their own cash advance.' : undefined}
+                              className="px-2.5 py-1 bg-emerald-700 text-white text-xs rounded font-semibold disabled:opacity-50"
+                            >
                               Approve
                             </button>
-                            <button onClick={() => handleApproveAdvance(ca, 'Rejected')} className="px-2.5 py-1 bg-rose-600 text-white text-xs rounded font-semibold">
+                            <button
+                              onClick={() => handleApproveAdvance(ca, 'Rejected')}
+                              disabled={ca.requesterId === profile.id}
+                              title={ca.requesterId === profile.id ? 'A requester cannot review their own cash advance.' : undefined}
+                              className="px-2.5 py-1 bg-rose-600 text-white text-xs rounded font-semibold disabled:opacity-50"
+                            >
                               Reject
                             </button>
                           </>
