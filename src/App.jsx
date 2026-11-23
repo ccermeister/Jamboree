@@ -810,7 +810,7 @@ export default function App() {
     );
   }
 
-  if (authLoading || (session && workspaceLoading)) {
+  if (authLoading || (session && (workspaceLoading || (!profile && !workspaceError)))) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100 text-sm font-medium text-slate-600">
         Connecting to Supabase…
